@@ -65,33 +65,28 @@ def _build_record(tr: ToleranceResult, present: bool, scale_px_per_mm: float) ->
     """
     Build a CSV/JSON record in pixel units.
 
-    px→mm conversion is preserved in comments for future clamp integration.
-    """
-    s = scale_px_per_mm if scale_px_per_mm > 0 else 1.0
-
-    # Convert mm values → px for display
-    cad_px      = round(tr.cad_dimension_mm * s, 2)
-    meas_px     = round(tr.measured_dimension_mm * s, 2)
-    dev_px      = round(tr.deviation_mm * s, 2)
+    Values from MeasuredFeature / ToleranceResult are already in px —
+    no conversion needed here.
 
     # ── PRESERVED: mm output for future clamp-phase reactivation ──────────
+    # When real-world scale is available, divide px values by scale_px_per_mm:
     # return {
     #     "feature_name":     tr.label,
     #     "feature_present":  "YES" if present else "NO",
-    #     "cad_size_mm":      round(tr.cad_dimension_mm, 4),
-    #     "measured_size_mm": round(tr.measured_dimension_mm, 4),
-    #     "deviation_mm":     round(tr.deviation_mm, 4),
+    #     "cad_size_mm":      round(tr.cad_dimension_mm / scale_px_per_mm, 4),
+    #     "measured_size_mm": round(tr.measured_dimension_mm / scale_px_per_mm, 4),
+    #     "deviation_mm":     round(tr.deviation_mm / scale_px_per_mm, 4),
     #     "tolerance_mm":     round(tr.tolerance_mm, 4),
     #     "status":           tr.status,
-    #     "unit":             tr.unit,
+    #     "unit":             "mm",
     # }
-
+    """
     return {
         "feature_name":     tr.label,
         "feature_present":  "YES" if present else "NO",
-        "cad_size_px":      cad_px,
-        "measured_size_px": meas_px,
-        "deviation_px":     dev_px,
+        "cad_size_px":      round(tr.cad_dimension_mm, 2),
+        "measured_size_px": round(tr.measured_dimension_mm, 2),
+        "deviation_px":     round(tr.deviation_mm, 2),
         # tolerance and status omitted — evaluation disabled
     }
 
@@ -243,13 +238,13 @@ def _build_visual_report(
             cv2.circle(photo, (cx, cy), r,     color, 2, cv2.LINE_AA)
             cv2.circle(photo, (cx, cy), r + 4, color, 1, cv2.LINE_AA)
 
-            # Dashed expected CAD circle
+            # Dashed expected CAD circle (cad_value_mm already scaled to px in Stage 6)
             cad_r_vis = max(3, int(round(float(pair.cad_value_mm) * s * scale_vis)))
             for seg in range(0, 360, 20):
                 cv2.ellipse(photo, (cx, cy), (cad_r_vis, cad_r_vis),
                             0, seg, seg + 10, (180, 180, 60), 1, cv2.LINE_AA)
 
-            # Callout in pixels — only if measurement was recorded
+            # Callout — values are already in px
             if trs:
                 meas_r_px = float(pair.image_value_px)
                 cad_r_px  = float(pair.cad_value_mm) * s
@@ -264,15 +259,10 @@ def _build_visual_report(
             _draw_index_dot(photo, idx, cx, cy, color)
 
             # ── PRESERVED: mm callout for future clamp integration ────────
-            # meas_r_mm = float(pair.image_value_px) / s
-            # cad_r_mm  = float(pair.cad_value_mm)
+            # Divide by scale_px_per_mm to convert back to mm when available:
+            # meas_r_mm = float(pair.image_value_px) / scale_px_per_mm
+            # cad_r_mm  = float(pair.cad_value_mm)   / ... (depends on chain)
             # dev_r_mm  = meas_r_mm - cad_r_mm
-            # callout_lines = [
-            #     (f"#{idx} {pair.label}", _C_CALLOUT),
-            #     (f"CAD  r={cad_r_mm:.3f}mm", (160, 160, 160)),
-            #     (f"Meas r={meas_r_mm:.3f}mm", _C_TEXT),
-            #     (f"Dev  {dev_r_mm:+.3f}mm", color),
-            # ]
 
         elif pair.feature_type == "rect":
             img_wh = pair.image_value_px
@@ -304,7 +294,7 @@ def _build_visual_report(
                              (int(p1[0]+(p2[0]-p1[0])*t1), int(p1[1]+(p2[1]-p1[1])*t1)),
                              (180, 180, 60), 1, cv2.LINE_AA)
 
-            # Callout in pixels — only if measurement was recorded
+            # Callout — values are already in px
             if trs:
                 mw_px = float(img_wh[0])
                 mh_px = float(img_wh[1])
@@ -320,16 +310,9 @@ def _build_visual_report(
             _draw_index_dot(photo, idx, cx, cy, color)
 
             # ── PRESERVED: mm callout for future clamp integration ────────
-            # mw_mm = float(img_wh[0]) / s
-            # mh_mm = float(img_wh[1]) / s
-            # cw_mm = float(pair.cad_value_mm[0])
-            # ch_mm = float(pair.cad_value_mm[1])
-            # callout_lines = [
-            #     (f"#{idx} {pair.label}", _C_CALLOUT),
-            #     (f"CAD  {cw_mm:.2f}x{ch_mm:.2f}mm", (160, 160, 160)),
-            #     (f"Meas {mw_mm:.2f}x{mh_mm:.2f}mm", _C_TEXT),
-            #     (f"dW={mw_mm-cw_mm:+.2f} dH={mh_mm-ch_mm:+.2f}mm", color),
-            # ]
+            # Divide by scale_px_per_mm when real-world scale is available:
+            # mw_mm = float(img_wh[0]) / scale_px_per_mm
+            # mh_mm = float(img_wh[1]) / scale_px_per_mm
 
     # ── 2b. Draw center bore overlay if available ────────────────────────
     # center_bore has a ToleranceResult but no MatchedPair with that label.
@@ -354,10 +337,10 @@ def _build_visual_report(
         cv2.line(photo, (cb_cx, cb_cy - arm), (cb_cx, cb_cy + arm), cb_color, 1, cv2.LINE_AA)
 
         if cb_tr is not None:
-            s_cb = scale_px_per_mm if scale_px_per_mm > 0 else 1.0
-            cad_d_px  = cb_tr.cad_dimension_mm * s_cb
-            meas_d_px = cb_tr.measured_dimension_mm * s_cb
-            dev_d_px  = cb_tr.deviation_mm * s_cb
+            # Values already in px — no * s_cb needed
+            cad_d_px  = cb_tr.cad_dimension_mm
+            meas_d_px = cb_tr.measured_dimension_mm
+            dev_d_px  = cb_tr.deviation_mm
             cb_lines = [
                 ("CENTER BORE", _C_CALLOUT),
                 (f"CAD  d={cad_d_px:.1f}px", (160, 160, 160)),
@@ -433,14 +416,16 @@ def _build_visual_report(
         idx_str = str(feature_index.get(p.label, "-")) if p else "-"
 
         name    = tr.label[:22]
-        cad_px  = f"{tr.cad_dimension_mm * s:.1f}"
-        meas_px = f"{tr.measured_dimension_mm * s:.1f}"
-        dev_px  = f"{tr.deviation_mm * s:+.1f}"
+        # Values are already in px — no * s needed
+        cad_px  = f"{tr.cad_dimension_mm:.1f}"
+        meas_px = f"{tr.measured_dimension_mm:.1f}"
+        dev_px  = f"{tr.deviation_mm:+.1f}"
 
         # ── PRESERVED: mm display for future reactivation ─────────────
-        # cad_v  = f"{tr.cad_dimension_mm:.3f}"
-        # meas_v = f"{tr.measured_dimension_mm:.3f}"
-        # dev_v  = f"{tr.deviation_mm:+.3f}"
+        # Divide by scale_px_per_mm when real-world scale is available:
+        # cad_v  = f"{tr.cad_dimension_mm / s:.3f}mm"
+        # meas_v = f"{tr.measured_dimension_mm / s:.3f}mm"
+        # dev_v  = f"{tr.deviation_mm / s:+.3f}mm"
 
         _put(leg, idx_str,  x0,                          y, (160,160,160), _FS)
         _put(leg, name,     x0+C_IDX,                    y, _C_TEXT,       _FS)

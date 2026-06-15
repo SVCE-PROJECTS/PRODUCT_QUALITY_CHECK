@@ -41,12 +41,12 @@ logger = logging.getLogger(__name__)
 class ToleranceResult:
     feature_type: str
     label: str
-    cad_dimension_mm: float       # nominal from DXF (mm)
-    measured_dimension_mm: float  # measured from image (mm)
-    deviation_mm: float           # measured − nominal (mm)
-    tolerance_mm: float           # ±tolerance (mm) — set to 0.0 while disabled
-    status: str                   # "PASS" | "FAIL" — always "" while disabled
-    unit: str = "mm"
+    cad_dimension_mm: float       # nominal in px (field name kept for compat)
+    measured_dimension_mm: float  # measured in px (field name kept for compat)
+    deviation_mm: float           # deviation in px (field name kept for compat)
+    tolerance_mm: float           # set to 0.0 — evaluation disabled
+    status: str                   # always "" — no PASS/FAIL
+    unit: str = "px"
 
 
 def verify_tolerances(

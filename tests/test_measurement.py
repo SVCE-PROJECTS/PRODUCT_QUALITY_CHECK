@@ -18,7 +18,7 @@ from dimension_analysis.measurement import (
     recover_dimensions,
     MeasuredFeature,
     _measure_overall_from_mask,
-    _measure_circle_radius_mm,
+    _measure_circle_radius_px,
 )
 from dimension_analysis.feature_matcher import MatchedPair
 from dimension_analysis.transform_estimator import TransformResult
@@ -52,7 +52,7 @@ def _make_circle_pair(
         feature_type="circle",
         label=label,
         cad_value_mm=cad_r_mm,
-        image_value_px=cad_r_mm * total_scale,  # Stage-2 r_px (tautological fallback value)
+        image_value_px=cad_r_mm * total_scale,
         cad_pos=(0.0, 0.0),
         image_pos_px=(img_cx, img_cy),
         scale_px_per_mm=total_scale,
@@ -72,40 +72,41 @@ def _bright_rect_image(rect_x1=50, rect_y1=80, rect_x2=250, rect_y2=220,
 # Unit tests — MeasuredFeature
 # ---------------------------------------------------------------------------
 
-def test_measured_feature_unit_is_mm():
+def test_measured_feature_unit_is_px():
     mf = MeasuredFeature(
         feature_type="circle_radius",
         label="test",
-        cad_dimension_mm=5.0,
-        measured_dimension_mm=5.1,
-        deviation_mm=0.1,
+        cad_dimension_px=25.0,
+        measured_dimension_px=25.5,
+        deviation_px=0.5,
     )
-    assert mf.unit == "mm"
+    assert mf.unit == "px"
 
 
-def test_measured_feature_aliases_equal_mm_fields():
+def test_measured_feature_mm_aliases_equal_px_fields():
+    """Backward-compat mm-named properties must equal the px fields."""
     mf = MeasuredFeature(
         feature_type="circle_radius",
         label="test",
-        cad_dimension_mm=3.0,
-        measured_dimension_mm=3.2,
-        deviation_mm=0.2,
+        cad_dimension_px=15.0,
+        measured_dimension_px=16.0,
+        deviation_px=1.0,
     )
-    assert mf.cad_dimension_px == mf.cad_dimension_mm
-    assert mf.measured_dimension_px == mf.measured_dimension_mm
-    assert mf.deviation_px == mf.deviation_mm
+    assert mf.cad_dimension_mm == mf.cad_dimension_px
+    assert mf.measured_dimension_mm == mf.measured_dimension_px
+    assert mf.deviation_mm == mf.deviation_px
 
 
 def test_measured_feature_deviation_is_measured_minus_cad():
     mf = MeasuredFeature(
         feature_type="rect_width",
         label="cutout_width",
-        cad_dimension_mm=25.0,
-        measured_dimension_mm=25.4,
-        deviation_mm=0.4,
+        cad_dimension_px=125.0,
+        measured_dimension_px=127.0,
+        deviation_px=2.0,
     )
-    assert mf.deviation_mm == pytest.approx(
-        mf.measured_dimension_mm - mf.cad_dimension_mm, abs=1e-6
+    assert mf.deviation_px == pytest.approx(
+        mf.measured_dimension_px - mf.cad_dimension_px, abs=1e-6
     )
 
 
@@ -114,27 +115,26 @@ def test_measured_feature_deviation_is_measured_minus_cad():
 # ---------------------------------------------------------------------------
 
 def test_measure_overall_bright_rect():
-    """Should detect a bright rectangular part and return correct mm size."""
-    scale = 5.0  # 5 px/mm
+    """Should detect a bright rectangular part and return correct px size."""
     img = _bright_rect_image(50, 80, 250, 220)   # 200px wide × 140px tall
-    w_mm, h_mm = _measure_overall_from_mask(img, scale)
-    assert w_mm is not None and h_mm is not None
-    # Width ~200px / 5 = 40mm, height ~140px / 5 = 28mm (±3mm tolerance)
-    assert abs(w_mm - 40.0) < 4.0, f"Expected ~40mm width, got {w_mm:.2f}"
-    assert abs(h_mm - 28.0) < 4.0, f"Expected ~28mm height, got {h_mm:.2f}"
+    w_px, h_px = _measure_overall_from_mask(img)
+    assert w_px is not None and h_px is not None
+    assert abs(w_px - 200.0) < 20.0, f"Expected ~200px width, got {w_px:.1f}"
+    assert abs(h_px - 140.0) < 20.0, f"Expected ~140px height, got {h_px:.1f}"
 
 
 def test_measure_overall_empty_image_returns_none():
     img = np.zeros((200, 200), dtype=np.uint8)
-    w_mm, h_mm = _measure_overall_from_mask(img, 5.0)
-    # Either None or both valid — empty image should not crash
-    assert w_mm is None or (isinstance(w_mm, float) and w_mm >= 0)
+    w_px, h_px = _measure_overall_from_mask(img)
+    assert w_px is None or (isinstance(w_px, float) and w_px >= 0)
 
 
 def test_measure_overall_zero_scale_returns_none():
+    # scale parameter no longer exists — this test is replaced by a smoke test
     img = _bright_rect_image()
-    w_mm, h_mm = _measure_overall_from_mask(img, 0.0)
-    assert w_mm is None and h_mm is None
+    w_px, h_px = _measure_overall_from_mask(img)
+    # should not crash and should return a result or None
+    assert w_px is None or isinstance(w_px, float)
 
 
 # ---------------------------------------------------------------------------
@@ -145,24 +145,23 @@ def test_measure_circle_radius_detects_circle():
     """Create a synthetic circle in a gray image and verify Hough finds it."""
     img = np.zeros((200, 200), dtype=np.uint8)
     cv2.circle(img, (100, 100), 20, 180, -1)   # filled circle r=20px
-    # At scale 4 px/mm → expected radius 5mm, measured ~5mm
-    scale = 4.0
-    r_mm = _measure_circle_radius_mm(img, 100.0, 100.0, 20.0, scale)
-    if r_mm is not None:
-        assert 3.0 < r_mm < 8.0, f"Expected ~5mm, got {r_mm:.3f}mm"
+    r_px = _measure_circle_radius_px(img, 100.0, 100.0, 20.0)
+    if r_px is not None:
+        assert 10.0 < r_px < 30.0, f"Expected ~20px, got {r_px:.1f}px"
 
 
 def test_measure_circle_radius_empty_roi_returns_none():
     img = np.zeros((10, 10), dtype=np.uint8)
-    r_mm = _measure_circle_radius_mm(img, 100.0, 100.0, 20.0, 5.0)
-    assert r_mm is None
+    r_px = _measure_circle_radius_px(img, 100.0, 100.0, 20.0)
+    assert r_px is None
 
 
-def test_measure_circle_radius_zero_scale_returns_none():
+def test_measure_circle_radius_out_of_bounds_returns_none():
+    """Centre far outside the image — RoI will be empty."""
     img = np.zeros((200, 200), dtype=np.uint8)
     cv2.circle(img, (100, 100), 20, 180, -1)
-    r_mm = _measure_circle_radius_mm(img, 100.0, 100.0, 20.0, 0.0)
-    assert r_mm is None
+    r_px = _measure_circle_radius_px(img, 500.0, 500.0, 20.0)
+    assert r_px is None
 
 
 # ---------------------------------------------------------------------------
@@ -171,12 +170,10 @@ def test_measure_circle_radius_zero_scale_returns_none():
 
 def test_hole_spacing_uses_image_positions_not_cad():
     """
-    The key correctness test: spacing must come from image pixel distance
-    divided by total_scale, NOT from the CAD spacing.
+    Spacing must come from image pixel distance, not CAD.
 
-    Two holes are 10mm apart in CAD but imaged 60px apart.
-    At scale=5px/mm → measured spacing = 60/5 = 12mm (2mm error).
-    CAD spacing = 10mm.
+    Two holes are 10mm apart in CAD (= 50px at scale 5).
+    But in the image they are 60px apart → deviation = 10px.
     """
     scale = 5.0
     p1 = MatchedPair(
@@ -195,7 +192,7 @@ def test_hole_spacing_uses_image_positions_not_cad():
     fs = CADFeatureSet(
         part_type="rectangular",
         dxf_path="test",
-        hole_positions=[(0.0, 0.0), (10.0, 0.0)],  # CAD: 10mm apart
+        hole_positions=[(0.0, 0.0), (10.0, 0.0)],  # CAD: 10mm apart = 50px
         overall_width=50.0,
         overall_height=50.0,
     )
@@ -207,17 +204,16 @@ def test_hole_spacing_uses_image_positions_not_cad():
 
     assert len(spacing) == 1
     sp = spacing[0]
-    assert abs(sp.cad_dimension_mm - 10.0) < 0.01, "CAD spacing should be 10mm"
-    assert abs(sp.measured_dimension_mm - 12.0) < 0.5, (
-        f"Measured spacing should be ~12mm (60px/5px/mm), got {sp.measured_dimension_mm:.3f}"
-    )
-    assert abs(sp.deviation_mm - 2.0) < 0.5, (
-        f"Deviation should be ~2mm, got {sp.deviation_mm:.3f}"
-    )
+    assert abs(sp.cad_dimension_px - 50.0) < 1.0, \
+        f"CAD spacing should be 50px (10mm×5), got {sp.cad_dimension_px:.1f}"
+    assert abs(sp.measured_dimension_px - 60.0) < 2.0, \
+        f"Measured spacing should be ~60px, got {sp.measured_dimension_px:.1f}"
+    assert abs(sp.deviation_px - 10.0) < 2.0, \
+        f"Deviation should be ~10px, got {sp.deviation_px:.1f}"
 
 
-def test_hole_spacing_cad_uses_dxf_mm_not_pixels():
-    """CAD spacing must come from DXF positions (mm), not scaled pixel values."""
+def test_hole_spacing_cad_uses_dxf_positions():
+    """CAD spacing must come from DXF positions converted to px."""
     scale = 5.0
     p1 = MatchedPair(
         feature_type="circle", label="h1",
@@ -228,14 +224,14 @@ def test_hole_spacing_cad_uses_dxf_mm_not_pixels():
     p2 = MatchedPair(
         feature_type="circle", label="h2",
         cad_value_mm=1.5, image_value_px=7.5,
-        cad_pos=(31.75, 0.0), image_pos_px=(158.75, 0.0),  # exact scale match
+        cad_pos=(31.75, 0.0), image_pos_px=(158.75, 0.0),
         scale_px_per_mm=scale,
     )
 
     fs = CADFeatureSet(
         part_type="rectangular",
         dxf_path="test",
-        hole_positions=[(0.0, 0.0), (31.75, 0.0)],  # 31.75mm apart in DXF
+        hole_positions=[(0.0, 0.0), (31.75, 0.0)],  # 31.75mm → 158.75px at scale 5
         overall_width=60.0,
         overall_height=40.0,
     )
@@ -246,7 +242,8 @@ def test_hole_spacing_cad_uses_dxf_mm_not_pixels():
     spacing = [f for f in results if f.feature_type == "hole_spacing"]
 
     assert len(spacing) == 1
-    assert abs(spacing[0].cad_dimension_mm - 31.75) < 0.01
+    assert abs(spacing[0].cad_dimension_px - 158.75) < 1.0, \
+        f"CAD spacing should be ~158.75px, got {spacing[0].cad_dimension_px:.2f}"
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +260,7 @@ def test_recover_skips_circles_when_no_image():
     results = recover_dimensions([pair], fs, tr, real_gray=None)
     circle_features = [f for f in results if "circle" in f.feature_type]
     assert len(circle_features) == 0, (
-        "Circle features must be skipped when no image is provided "
-        "(Stage-2 r_px is tautological)"
+        "Circle features must be skipped when no image is provided"
     )
 
 
@@ -273,9 +269,8 @@ def test_recover_skips_circles_when_no_image():
 # ---------------------------------------------------------------------------
 
 def test_overall_width_measured_from_image_not_cad():
-    """overall_width must differ from CAD value when the image says otherwise."""
+    """overall_width must be measured from the image, not copied from CAD."""
     scale = 5.0
-    # CAD says 50mm wide, but image shows a ~200px / 5 = 40mm part
     fs = CADFeatureSet(
         part_type="rectangular",
         dxf_path="test",
@@ -283,13 +278,13 @@ def test_overall_width_measured_from_image_not_cad():
         overall_height=30.0,
     )
     tr = _make_transform_result(scale)
-    # 200×140 bright rect on 300×400 image → ~40×28mm
+    # 200×140 bright rect on 300×400 image → ~200×140px measured
     real_gray = _bright_rect_image(50, 80, 250, 220, 300, 400)
 
     results = recover_dimensions([], fs, tr, real_gray=real_gray)
     ow = [f for f in results if f.feature_type == "overall_width"]
 
-    if ow:   # may skip if mask fails — that's also acceptable
-        assert ow[0].measured_dimension_mm != ow[0].cad_dimension_mm or True
-        # The key thing: it was measured, not copied
-        assert ow[0].unit == "mm"
+    if ow:
+        # CAD nominal in px = 50mm × 5 = 250px; measured ~200px
+        assert ow[0].cad_dimension_px == pytest.approx(250.0, abs=1.0)
+        assert ow[0].unit == "px"
